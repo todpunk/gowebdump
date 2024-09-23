@@ -42,6 +42,8 @@ func (s *ConnServer) StartServer() {
 
 			if err != nil {
 				log.Println("Failed to accept new connection: ", err)
+				defer conn.Close()
+				continue
 			}
 			go DumpRequest(conn)
 		}
@@ -63,20 +65,35 @@ func DumpRequest(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	response := []byte("HTTP/1.1 200 OK\nContent-Type: text/html; charset=UTF-8\nServer: gowebdump 0.1\nDate: " + thttpfmt + "Content-Length: 2\n\nOK")
+	bodystart := false
 
 	for {
 		bytes, _, err := reader.ReadLine()
-		if err != nil {
-			log.Fatal(err)
+		if err != nil && err.Error() == "EOF" {
+			// We have seen the end of the request!
+			break
+		}
+		if err != nil && err.Error() != "EOF" {
+			// We don't know what happened
+			log.Println("failed to read line, err:")
+			log.Println(err)
+			return
 		}
 		// Write whatever every time, as we want the raw request as is
 		line := string(bytes)
 		if _, err := f.Write([]byte(line + "\n")); err != nil {
-			log.Fatal(err)
+			log.Println("failed to write line, err:")
+			log.Println(err)
+			return
 		}
-		if line == "" {
-			// We have an empty line, request over
+		if line == "" && bodystart {
+			// We have an empty line after the body, request over
 			break
+		}
+		if line == "" && !bodystart {
+			// We have an empty line before the body, continue
+			bodystart = true
+			continue
 		}
 	}
 
